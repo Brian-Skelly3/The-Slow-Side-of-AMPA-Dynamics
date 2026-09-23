@@ -1,33 +1,10 @@
-# -*- coding: utf-8 -*-
 """
-Created on Monday Jan 5th 14:23:40 2026
-
 A single neuron with certain Hz of stimulation
-
-numba is a librarry that runs the code in a c compiler somehow, so it's much faster
-
-
-
-@author: brian
 """
 
 # Hodgkin-Huxey network
-
 import numpy as np
-import matplotlib.pyplot as plt
-import scipy.stats as stats
-import joblib
-import time
 from numba import njit
-time_start = time.time()
-
-
-np.random.seed(123)
-
-# Neuron parameters
-# I_ext = 0.7 #Applied Current
-vsyn = 0
-
 
 # Excitatory parameters
 Cm = 1
@@ -37,15 +14,14 @@ E_k = -80
 g_l = 0.025
 g_na = 60
 g_k = 3
-vt = -45  # Will definitely spike past this param
+vsyn = 0
+vt = -45
 vth = 0
 vr = -48.9
 vspike = 54
 
 
-
-
-
+# Ion channel dynamics
 @njit
 def alpha_n(v):
     return (-0.032*(v-vt-15))/(np.exp(-(v-vt-15)/5)-1)
@@ -66,8 +42,9 @@ def beta_h(v):
     return 4/(1+np.exp(-(v-vt-40)/5))
 
 
+# Coupled Hodgkin-Huxley
 @njit
-def RHS(x,glutamate):
+def RHS(x, glutamate, tauK, taug, A1, A2, alpha, taux, tauu, U_0, k):
     
     m = x[0]
     n = x[1]
@@ -77,24 +54,17 @@ def RHS(x,glutamate):
     U = x[5]
     K = x[6]
     g = x[7]
-    
-    # eta=0.45 #-52mV
-    # eta=0.2 #-60mV
-    eta=0.08 #-67mV
-    # eta=0
 
-    # The different eta values essentially set the resting potentials without noise differentls
-    # Pampaloni had it set to -67mV for their voltage clamped experiments
-
+    # Bakcground drive
+    I=0.08
       
     dm = alpha_m(v)*(1-m)-beta_m(v)*m
     dn = alpha_n(v)*(1-n)-beta_n(v)*n
     dh = alpha_h(v)*(1-h)-beta_h(v)*h
 
-    dv = (-(g_na*(m**3)*h*(v-E_na) + g_k*(n**4)*(v-E_k) + g_l*(v-E_l)) + eta + k*(K+g)*(vsyn-v))/Cm
+    dv = (-(g_na*(m**3)*h*(v-E_na) + g_k*(n**4)*(v-E_k) + g_l*(v-E_l)) + I + k*(K+g)*(vsyn-v))/Cm
 
 
-    # U_plus = U #+ (U_0 * (1.0 - U))*glutamate
     dU = (U_0 - U)/tauu + (U_0 * (1.0 - U))*glutamate
     
     dX = (1-X)/taux - (alpha * U * X)*glutamate
@@ -106,120 +76,184 @@ def RHS(x,glutamate):
     return np.array([dm, dn, dh, dv, dX, dU, dK, dg])
 
 
-
-
-
-
-def HHkin(T=300, dt=0.001, freq=20):
+def HHkin(T, dt, freq, tauK, taug, A1, A2, alpha, taux, tauu, U_0, k, amp, var, on, seed):
     
-    M = int(T / dt)                                 # number of time steps
+    M = int(T / dt)                   # number of time steps
     t = np.linspace(0, T, M + 1)    
     
-    np.random.seed(123)
+    np.random.seed(seed)
     
-
     # Initial conditions
     m = 0
     n = 0
     h = 1
     v = np.zeros((M + 1))
-    np.random.seed(123)
     v[0] = -70
-    
-    X = np.ones((M + 1))
-    U = np.zeros((M + 1))+U_0
-    K = np.zeros((M + 1))
-    g = np.zeros((M + 1))
-    
 
-    
+    spikes =  0
 
-    x = np.array([m, n, h, v[0], X[0], U[0], K[0], g[0]])
+    x = np.array([m, n, h, v[0], 1, 0, 0, 0])
 
     # Loop over time steps
     # Simple Euler method
-
     for i in range(M):
         
         # Set the spike at certain frequencies between 100 and 2100ms
         if t[i]%(1000.0/freq)<=1 and t[i]>100.0 and t[i]<2100:
-              glutamate = 1
+              glutamate = on
         else:
               glutamate = 0
               
-        # r=1000 # Using dt instad of r so that even if the dt changes, it is the same amount of stimulatinos per second
-        x = x + dt*RHS(x,glutamate)
+        # Update by time step
+        x = x + dt*RHS(x,glutamate, tauK, taug, A1, A2, alpha, taux, tauu, U_0, k)
 
+        # Adding noise to v
+        x[3] += amp*np.random.poisson(var*(dt))   
 
-
-        # Adding noise to v, K, and g
-        # These are
-        x[3] += 0.1*np.random.poisson(3*(dt))   #np.sqrt(dt)*np.random.normal(0.0, 0.1) # v
-        x[6] += 0.02*np.random.poisson(0.05*dt)   #np.sqrt(dt)*(np.random.normal(0.0, 0.006)) #  K
-        x[7] += 0.0001*np.random.poisson(0.01*dt)   #np.sqrt(dt)*(np.random.normal(0.0, 0.0006)) #  g
-
+        # Check for a spike
+        if x[3]>0 and v[i]<0:
+            spikes += 1 
         
         # Update variables we wish to keep track of
-
         v[i+1] = x[3]
-        X[i+1] = x[4]
-        U[i+1] = x[5]
-        K[i+1] = x[6]
-        g[i+1] = x[7]
        
-    return t, v, X, U, K, g
+    return spikes
 
 
-
-def saving(tf=300, dt=0.001, freq=20):
-    t, v, X, U, K, g = HHkin(tf, dt, freq)
-    print('starting')
-    np.savez(f'1Neur_{str(freq).replace(".","_")}Hz_{str(tf).replace(".","_")}ms_TARPed_minus67mV_x0_9noise', t=t, V=v)
-    print('figure')
-    plt.figure()
-    plt.plot(t[:], v[:])
-    plt.xlabel('Time')
-    plt.ylabel('Voltages')
-    # plt.ylim(-60, -40)
-    plt.savefig(f'1Neur_{str(freq).replace(".","_")}Hz_{str(tf).replace(".","_")}ms_TARPed_V_minus67mV_x0_9noise')
-
-    
-    plt.figure()
-    plt.plot(t, K+g)
-    plt.xlabel('Time')
-    plt.ylabel('Conductances')
-    plt.savefig(f'1Neur_{str(freq).replace(".","_")}Hz_{str(tf).replace(".","_")}ms_TARPed_Kg_minus67mV_x0_9noise')
-
-    plt.figure()
-    plt.plot(t, X, label='X')
-    plt.plot(t, U, label='U')
-    plt.xlabel('Time')
-    plt.ylabel('X and U')
-    plt.legend()
-    plt.savefig(f'1Neur_{str(freq).replace(".","_")}Hz_{str(tf).replace(".","_")}ms_TARPed_XU_minus67mV_x0_9noise')
-
-    print(f'Finished {freq}Hz')
-
-
-
-# TARPless parameters
-# tauK, taug, A1, A2, alpha = [9.28782606e-01, 4.02802597e+02, 1.53943493e+00, 1.51940434e-03, 1]
-# taux, tauu, U_0 = [426.05575527,   0.66710861,   0.62727836]
-# k=0.3 # TARPless coupling
-
-
-# TARPed parameters
-tauK, taug, A1, A2, alpha = [9.02833091, 64.51534201,  1.23175149,  0.23848164, 1]
-taux, tauu, U_0 = [58.2495233,   0.56018434,  0.93773379]
-k=0.03 #TARPed coupling
-
-tf = 2100
+tf = 2000
 dt = 0.001
 freq = [5, 10, 20]
 
 
-joblib.Parallel(n_jobs=3)(joblib.delayed(saving)(tf, dt, value) for value in freq)
+n = 10
+reps = 10
+seeds = np.arange(1,1+reps,1)
 
-time_end = time.time()
+# -------------------------------------------------------------------------
+# Poisson kick amplitude sweeps
+# -------------------------------------------------------------------------
 
-print((time_end-time_start)//60, 'm ', 60*(((time_end-time_start)/60)-((time_end-time_start)//60)), 's')
+var = 0.5
+amp_range = np.linspace(0.3,1.2,n)
+
+spikes_5_U = np.zeros((n, reps))
+spikes_10_U = np.zeros((n, reps))
+spikes_20_U = np.zeros((n, reps))
+
+spikes_5_T = np.zeros((n, reps))
+spikes_10_T = np.zeros((n, reps))
+spikes_20_T = np.zeros((n, reps))
+
+spikes_5_N = np.zeros((n, reps))
+spikes_10_N = np.zeros((n, reps))
+spikes_20_N = np.zeros((n, reps))
+
+for j, amp in enumerate(amp_range):
+    for m in range(reps):
+        
+        
+        # TARPless parameters (change parameter values to obtain increased/decreased parameter curves)
+        tauK, taug, A1, A2, alpha = [9.28782606e-01, 4.02802597e+02, 1.53943493e+00, 1.51940434e-03, 1]
+        taux, tauu, U_0 = [426.05575527,   0.66710861,   0.62728]
+        k=0.3 # TARPless coupling
+        
+        spikes_5_N[j,m] = HHkin(tf, dt, 5, tauK, taug, A1, A2, alpha, taux, tauu, U_0, k, amp, var, 0, seeds[m])
+        spikes_10_N[j,m] = HHkin(tf, dt, 10, tauK, taug, A1, A2, alpha, taux, tauu, U_0, k, amp, var, 0, seeds[m])
+        spikes_20_N[j,m] = HHkin(tf, dt, 20, tauK, taug, A1, A2, alpha, taux, tauu, U_0, k, amp, var, 0, seeds[m])
+              
+        spikes_5_U[j,m] = HHkin(tf, dt, 5, tauK, taug, A1, A2, alpha, taux, tauu, U_0, k, amp, var, 1, seeds[m])
+        spikes_10_U[j,m] = HHkin(tf, dt, 10, tauK, taug, A1, A2, alpha, taux, tauu, U_0, k, amp, var, 1, seeds[m])
+        spikes_20_U[j,m] = HHkin(tf, dt, 20, tauK, taug, A1, A2, alpha, taux, tauu, U_0, k, amp, var, 1, seeds[m])
+        
+        
+        # TARPed parameters (change parameter values to obtain increased/decreased parameter curves)
+        tauK, taug, A1, A2, alpha = [9.02833091, 64.51534201,  1.23175149,  0.23848164, 1]
+        taux, tauu, U_0 = [58.2495233,   0.56018434,  0.93773]
+        k=0.03 #TARPed coupling
+        
+        spikes_5_T[j,m] = HHkin(tf, dt, 5, tauK, taug, A1, A2, alpha, taux, tauu, U_0, k, amp, var, 1, seeds[m])
+        spikes_10_T[j,m] = HHkin(tf, dt, 10, tauK, taug, A1, A2, alpha, taux, tauu, U_0, k, amp, var, 1, seeds[m])
+        spikes_20_T[j,m] = HHkin(tf, dt, 20, tauK, taug, A1, A2, alpha, taux, tauu, U_0, k, amp, var, 1, seeds[m])
+        
+        print(f'Rep {m} of amp {amp} Finished ')
+    print(f'Amp {amp} Finished \n')
+
+# Save Poisson kick amplitude data
+np.savetxt('increasing_noise_amplitude/amplitude_range.csv', amp_range, delimiter=',', fmt='%f')
+
+np.savetxt('increasing_noise_amplitude/firing_rates_no_input_5Hz.csv', spikes_5_N/(tf/1000), delimiter=',', fmt='%f')
+np.savetxt('increasing_noise_amplitude/firing_rates_no_input_10Hz.csv', spikes_10_N/(tf/1000), delimiter=',', fmt='%f')
+np.savetxt('increasing_noise_amplitude/firing_rates_no_input_20Hz.csv', spikes_20_N/(tf/1000), delimiter=',', fmt='%f')
+
+np.savetxt('increasing_noise_amplitude/firing_rates_TARPless_20Hz.csv', spikes_20_U/(tf/1000), delimiter=',', fmt='%f')
+np.savetxt('increasing_noise_amplitude/firing_rates_TARPless_10Hz.csv', spikes_10_U/(tf/1000), delimiter=',', fmt='%f')
+np.savetxt('increasing_noise_amplitude/firing_rates_TARPless_5Hz.csv', spikes_5_U/(tf/1000), delimiter=',', fmt='%f')
+
+np.savetxt('increasing_noise_amplitude/firing_rates_TARPed_5Hz.csv', spikes_5_T/(tf/1000), delimiter=',', fmt='%f')
+np.savetxt('increasing_noise_amplitude/firing_rates_TARPed_10Hz.csv', spikes_10_T/(tf/1000), delimiter=',', fmt='%f')
+np.savetxt('increasing_noise_amplitude/firing_rates_TARPed_20Hz.csv', spikes_20_T/(tf/1000), delimiter=',', fmt='%f')
+
+
+print('Amplitude run finished \n \n')
+
+
+# -------------------------------------------------------------------------
+# Poisson rate sweeps
+# -------------------------------------------------------------------------
+
+amp = 0.5
+var_range = np.linspace(1,1.9,n)
+
+spikes_5_U = np.zeros((n, reps))
+spikes_10_U = np.zeros((n, reps))
+spikes_20_U = np.zeros((n, reps))
+
+spikes_5_T = np.zeros((n, reps))
+spikes_10_T = np.zeros((n, reps))
+spikes_20_T = np.zeros((n, reps))
+
+for j, var in enumerate(var_range):
+    for m in range(reps):
+                
+        # TARPless parameters (change parameter values to obtain increased/decreased parameter curves)
+        tauK, taug, A1, A2, alpha = [9.28782606e-01, 4.02802597e+02, 1.53943493e+00, 1.51940434e-03, 1]
+        taux, tauu, U_0 = [426.05575527,   0.66710861,   0.62727836]
+        k=0.3 # TARPless coupling
+        
+        spikes_5_N[j,m] = HHkin(tf, dt, 5, tauK, taug, A1, A2, alpha, taux, tauu, U_0, k, amp, var, 0, seeds[m])
+        spikes_10_N[j,m] = HHkin(tf, dt, 10, tauK, taug, A1, A2, alpha, taux, tauu, U_0, k, amp, var, 0, seeds[m])
+        spikes_20_N[j,m] = HHkin(tf, dt, 20, tauK, taug, A1, A2, alpha, taux, tauu, U_0, k, amp, var, 0, seeds[m])
+        
+        spikes_5_U[j,m] = HHkin(tf, dt, 5, tauK, taug, A1, A2, alpha, taux, tauu, U_0, k, amp, var, 1, seeds[m])
+        spikes_10_U[j,m] = HHkin(tf, dt, 10, tauK, taug, A1, A2, alpha, taux, tauu, U_0, k, amp, var, 1, seeds[m])
+        spikes_20_U[j,m] = HHkin(tf, dt, 20, tauK, taug, A1, A2, alpha, taux, tauu, U_0, k, amp, var, 1, seeds[m])
+        
+        # TARPed parameters (change parameter values to obtain increased/decreased parameter curves)
+        tauK, taug, A1, A2, alpha = [9.02833091, 64.51534201,  1.23175149,  0.23848164, 1]
+        taux, tauu, U_0 = [58.2495233,   0.56018434,  0.93773379]
+        k=0.03 #TARPed coupling
+        
+        spikes_5_T[j,m] = HHkin(tf, dt, 5, tauK, taug, A1, A2, alpha, taux, tauu, U_0, k, amp, var, 1, seeds[m])
+        spikes_10_T[j,m] = HHkin(tf, dt, 10, tauK, taug, A1, A2, alpha, taux, tauu, U_0, k, amp, var, 1, seeds[m])
+        spikes_20_T[j,m] = HHkin(tf, dt, 20, tauK, taug, A1, A2, alpha, taux, tauu, U_0, k, amp, var, 1, seeds[m])
+        
+        print(f'Rep {m} of var {var} Finished ')
+    print(f'Var {var} Finished ')
+
+# Save Poisson rate data
+np.savetxt('increasing_noise_variance/variance_range.csv', var_range, delimiter=',', fmt='%f')
+
+np.savetxt('increasing_noise_variance/firing_rates_no_input_5Hz.csv', spikes_5_N/(tf/1000), delimiter=',', fmt='%f')
+np.savetxt('increasing_noise_variance/firing_rates_no_input_10Hz.csv', spikes_10_N/(tf/1000), delimiter=',', fmt='%f')
+np.savetxt('increasing_noise_variance/firing_rates_no_input_20Hz.csv', spikes_20_N/(tf/1000), delimiter=',', fmt='%f')
+
+np.savetxt('increasing_noise_variance/firing_rates_TARPless_5Hz.csv', spikes_5_U/(tf/1000), delimiter=',', fmt='%f')
+np.savetxt('increasing_noise_variance/firing_rates_TARPless_10Hz.csv', spikes_10_U/(tf/1000), delimiter=',', fmt='%f')
+np.savetxt('increasing_noise_variance/firing_rates_TARPless_20Hz.csv', spikes_20_U/(tf/1000), delimiter=',', fmt='%f')
+
+np.savetxt('increasing_noise_variance/firing_rates_TARPed_5Hz.csv', spikes_5_T/(tf/1000), delimiter=',', fmt='%f')
+np.savetxt('increasing_noise_variance/firing_rates_TARPed_10Hz.csv', spikes_10_T/(tf/1000), delimiter=',', fmt='%f')
+np.savetxt('increasing_noise_variance/firing_rates_TARPed_20Hz.csv', spikes_20_T/(tf/1000), delimiter=',', fmt='%f')
+
+print('Variance run finished ')
+
