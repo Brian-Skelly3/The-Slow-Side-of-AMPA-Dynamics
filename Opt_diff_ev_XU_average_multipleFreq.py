@@ -259,10 +259,11 @@ def get_av(TARPed=0, N=10):
 
     
 
-# "TARPed=0" for TARPless, "TARPed=1" for TARPed
-TARPed=1
-# If changing "TARPed," must change the save file name too
-N=30
 
-
-get_av(TARPed, N)
+# I have to add the below i case only on Windows.
+if __name__ == '__main__':
+    # "TARPed=0" for TARPless, "TARPed=1" for TARPed
+    TARPed=0
+    # If changing "TARPed," must change the save file name too
+    N = 1
+    get_av(TARPed, N)

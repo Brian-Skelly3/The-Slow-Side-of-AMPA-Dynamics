@@ -13,7 +13,7 @@ from scipy.optimize import differential_evolution
 #### Defining functions
 
 # KR model
-def Milstein2007(t, y, glut_type=0, CC=36.5, CO=4.55, CS_plus1=0.3, CS_minus1=10.0, gamma1 =.001, gamma2 = 0.01, beta=10, t2=1, delta1=1.1, delta2=0.3, briansconst=1.0):
+def Milstein2007(t, y, CC=36.5, CO=4.55, CS_plus1=0.3, CS_minus1=10.0, gamma1 =.001, gamma2 = 0.01, beta=10, t2=1, delta1=1.1, delta2=0.3, briansconst=1.0):
 
     
     R = y[0]
@@ -59,9 +59,8 @@ D1_0 = np.array([0.0])
 O2_0 = np.array([0.0])
 C2_0 = np.array([0.0])
 D2_0 = np.array([0.0])
-s_0 = np.array([0.0])
 
-y3 = np.concatenate([R_0, RG_0, O1_0, C1_0, D1_0, O2_0, C2_0, D2_0, s_0])
+y3 = np.concatenate([R_0, RG_0, O1_0, C1_0, D1_0, O2_0, C2_0, D2_0])
 
 # Setting the parameter values
 # Some of these will change later
@@ -114,13 +113,13 @@ def time_2first_ord(t, x, t2=1, taux=100, tauu=100, tauK=3, taug=5, A1=1, A2=1, 
 
 
 
-# SImulate the ODEs
-def simulate(params, t_eval, x0, glut_type=0, t2=10000):
+# Simulate the ODEs
+def simulate(params, t_eval, x0, t2=1):
     taux, tauu, tauK, taug, A1, A2, alpha, U_0 = params
     def odes(t, x):
-        return time_2first_ord(t, x, glut_type, t2, taux, tauu, tauK, taug, A1, A2, alpha, U_0)
+        return time_2first_ord(t, x, t2, taux, tauu, tauK, taug, A1, A2, alpha, U_0)
     # print(len(t_eval))
-    sol = solve_ivp(odes, [t_eval[0], t_eval[-1]], x0, t_eval=t_eval, method='RK45')
+    sol = solve_ivp(odes, [t_eval[0], t_eval[-1]], x0, t_eval=t_eval, method='LSODA')
     return sol.y
 
 
@@ -129,13 +128,13 @@ def simulate(params, t_eval, x0, glut_type=0, t2=10000):
 
 
 # Define the cost function
-def cost_function_log(params, t_eval, x0, ydata, fixed_params, glut_type=0, t2=10000):
+def cost_function_log(params, t_eval, x0, ydata, fixed_params, t2=1):
     tauK, taug, A1, A2 = params
     taux, tauu, alpha, U_0 = fixed_params
     
     all_params = [taux, tauu, tauK, taug, A1, A2, alpha, U_0]
     
-    sol = simulate(all_params, t_eval, x0, glut_type, t2)
+    sol = simulate(all_params, t_eval, x0, t2)
 
     model_output = sol[2] + sol[3]
 
@@ -184,7 +183,7 @@ def get_av(TARPed=0, N=10):
         fixed_params = [380, 20, 1, 0.4] # Estimates found by trial and error
         x0 = [1, 0.6, 0, 0]             # initial conditions
 
-        solMilmul20 = solve_ivp(Milstein2007, [0, 50], y3, args =  (3, 36.5, 4.55, 0.3, 10.0, .003, 0.03, 10.0, 1, 1.1, 0.3, 0.1), dense_output=True, rtol=1e-8, method='LSODA', max_step=0.1)
+        solMilmul20 = solve_ivp(Milstein2007, [0, 50], y3, args =  (36.5, 4.55, 0.3, 10.0, .003, 0.03, 10.0, 1, 1.1, 0.3, 0.1), dense_output=True, rtol=1e-8, method='LSODA', max_step=0.1)
         xdata = solMilmul20.t
         ydata = solMilmul20.y[2] + 2*solMilmul20.y[5]
         print("For unTARPed ativity")   
@@ -196,7 +195,7 @@ def get_av(TARPed=0, N=10):
         fixed_params = [65, 1.5, 1, 0.85] # Estimates found by trial and error
         x0 = [1.0, 0.85, 0.0, 0.0]             # initial conditions
 
-        solMil2mul20 = solve_ivp(Milstein2007, [0, 500], y3, args = (3, 25, 2.5, 1.0, 3.4, .03, 0.03, 100.0, 1, 1.1, 0.3, 0.1), dense_output=True, rtol=1e-8, method='LSODA', max_step=0.1)
+        solMil2mul20 = solve_ivp(Milstein2007, [0, 500], y3, args = (25, 2.5, 1.0, 3.4, .03, 0.03, 100.0, 1, 1.1, 0.3, 0.1), dense_output=True, rtol=1e-8, method='LSODA', max_step=0.1)
         xdata = solMil2mul20.t
         ydata = solMil2mul20.y[2] + 2*solMil2mul20.y[5]
 
@@ -216,7 +215,7 @@ def get_av(TARPed=0, N=10):
         result2 = differential_evolution(
             cost_function_log, 
             bounds, 
-            args=(xdata, x0, ydata, fixed_params, 3),  # glut_type=0, t2=10000
+            args=(xdata, x0, ydata, fixed_params, 1),  # t2=10000
             maxiter=10000,
             popsize=150,
             workers=-1,      # parallelise if possible
@@ -236,16 +235,19 @@ def get_av(TARPed=0, N=10):
     print('A1 = ', np.mean(result[:,2]))
     print('A2 = ', np.mean(result[:,3]))
 
-    # np.save('Data/Optimised params/Opt_params_TARPed_Kg', result)
+    # np.save('Data/Optimised params/Opt_params_TARPless_Kg', result)
 
 
     
 
 
-# "TARPed=0" for TARPless, "TARPed=1" for TARPed
-TARPed=1
-# If changing "TARPed," must change the save file name tooN=30
 
 
-get_av(TARPed, N)
+# I have to add the below i case only on Windows.
+if __name__ == '__main__':
+    # "TARPed=0" for TARPless, "TARPed=1" for TARPed
+    TARPed=0
+    # If changing "TARPed," must change the save file name too
+    N = 2
+    get_av(TARPed, N)
 
