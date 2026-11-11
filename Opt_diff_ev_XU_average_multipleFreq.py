@@ -230,12 +230,11 @@ def get_av(TARPed=0, N=10):
 
 
         print('i = ', i)
-        print('freq = ', freq)
 
         result2 = differential_evolution(
             cost_function_log, 
             bounds, 
-            args=(xdata, x0, ydata, fixed_params, 3),
+            args=(xdata, x0, ydata, fixed_params),
             maxiter=10000,
             popsize=150,
             workers=-1,      # parallelize if possible
@@ -254,7 +253,7 @@ def get_av(TARPed=0, N=10):
     print('tauU = ', np.mean(result[:,1]))
     print('U_0 = ', np.mean(result[:,2]))
 
-    # np.save('Data/Optimised params/Opt_params_TARPed_XU_mixedfreq', result)
+    # np.save('Data/Optimised params/Opt_params_TARPed_XU', result)
 
 
     
@@ -265,5 +264,5 @@ if __name__ == '__main__':
     # "TARPed=0" for TARPless, "TARPed=1" for TARPed
     TARPed=0
     # If changing "TARPed," must change the save file name too
-    N = 1
+    N = 30
     get_av(TARPed, N)

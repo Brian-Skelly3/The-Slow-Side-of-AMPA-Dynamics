@@ -186,7 +186,7 @@ def get_av(TARPed=0, N=10):
         solMilmul20 = solve_ivp(Milstein2007, [0, 50], y3, args =  (36.5, 4.55, 0.3, 10.0, .003, 0.03, 10.0, 1, 1.1, 0.3, 0.1), dense_output=True, rtol=1e-8, method='LSODA', max_step=0.1)
         xdata = solMilmul20.t
         ydata = solMilmul20.y[2] + 2*solMilmul20.y[5]
-        print("For unTARPed ativity")   
+        print("For TARPless ativity")   
 
 
     if TARPed==1:
@@ -248,6 +248,6 @@ if __name__ == '__main__':
     # "TARPed=0" for TARPless, "TARPed=1" for TARPed
     TARPed=0
     # If changing "TARPed," must change the save file name too
-    N = 2
+    N = 30
     get_av(TARPed, N)
 
