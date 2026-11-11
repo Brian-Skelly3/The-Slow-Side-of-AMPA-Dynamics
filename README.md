@@ -8,8 +8,6 @@ The folder, "Data," contains all of the data necessary for this paper. Each set 
 
 "1neur1recep.py" is for simulating the single neuron Hodgkin-Huxley data.
 
-"Import_KineticModelBuiledr_Data.ipynb" is used for importing the Monte Carlo ismulation data and plotting against the deterministic model data.
-
 "HH_KR_network.py" is for simulating the network of Hodgkin-Huxley equations using the KR model for coupling.
 
 "HH_red_network.py" is for simulating the network of Hodgkin-Huxley equations using the reduced model for coupling.
